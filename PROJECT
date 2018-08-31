@@ -1,0 +1,3 @@
+version: "1"
+domain: secretsengine.io
+repo: github.com/secretsengine/secretsengine
