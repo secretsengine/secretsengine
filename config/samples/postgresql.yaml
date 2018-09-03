@@ -1,0 +1,96 @@
+# Create namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dynamicsecretconfig-sample
+
+---
+
+# Configure Password secrets engine
+apiVersion: config.secretsengine.io/v1alpha1
+kind: DynamicSecretConfig
+metadata:
+  name: password-secrets-engine
+  namespace: dynamicsecretconfig-sample
+spec:
+  password:
+    length: 10
+    numSymbols: 5
+
+---
+
+# Provision PostgreSQL root password using password generator
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-root-secret
+  namespace: dynamicsecretconfig-sample
+  annotations:
+    secretsengine.io/dynamic-secret-config.name: password-secrets-engine
+data: 
+
+---
+
+# Create Postgres pod, configured with root password
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres
+  namespace: dynamicsecretconfig-sample
+  labels:
+    app: postgres
+spec:
+  containers:
+  - name: postgres
+    image: postgres
+    ports:
+      - containerPort: 5432
+    env:
+      - name: POSTGRES_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: postgres-root-secret
+            key: password
+
+---
+
+# Create postgres service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: dynamicsecretconfig-sample
+spec:
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432
+
+---
+
+# Configure PostgreSQL secrets engine
+apiVersion: config.secretsengine.io/v1alpha1
+kind: DynamicSecretConfig
+metadata:
+  name: postgresql-secrets-engine
+  namespace: dynamicsecretconfig-sample
+spec:
+  secretName: postgres-root-secret
+  postgresql:
+    uri: postgresql://postgres:5432/
+    creation:
+      - CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '{{password}}'
+      - GRANT SELECT ON ALL TABLES IN SCHEMA public TO "{{name}}"
+
+---
+
+# Provision PostgreSQL client credentials using PostgreSQL secrets engine
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-client-secret
+  namespace: dynamicsecretconfig-sample
+  annotations:
+    secretsengine.io/dynamic-secret-config.name: postgresql-secrets-engine
+data: 

@@ -20,37 +20,96 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// DynamicSecretConfig is used to configure a secrets engine. It describes
+// the dynamic secret that will be created and how it will be created (service,
+// connection and authentication information).
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type DynamicSecretConfig struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired state of a secrets engine.
+	// More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#spec-and-status
+	// +optional
+	Spec DynamicSecretConfigSpec `json:"spec,omitempty"`
+}
 
 // DynamicSecretConfigSpec defines the desired state of DynamicSecretConfig
 type DynamicSecretConfigSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+
+	// +optional
+	Consul *ConsulConfig `json:"consul,omitempty"`
+
+	// +optional
+	RabbitMQ *RabbitMQConfig `json:"rabbitmq,omitempty"`
+
+	// +optional
+	PostgreSQL *PostgreSQLConfig `json:"postgresql,omitempty"`
+
+	// +optional
+	Password *PasswordConfig `json:"password,omitempty"`
 }
 
-// DynamicSecretConfigStatus defines the observed state of DynamicSecretConfig
-type DynamicSecretConfigStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+// ConsulConfig contains the connection and policy information used to
+// provision and revoke a Consul secret.
+type ConsulConfig struct {
+	Address   string `json:"address"`
+	TokenType string `json:"tokenType"`
+	Policy    string `json:"policy"`
 }
 
-// +genclient
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// RabbitMQConfig contains the connection, tags and vhost information used to
+// provision and revoke a RabbitMQ secret.
+type RabbitMQConfig struct {
+	URI string `json:"uri"`
 
-// DynamicSecretConfig is the Schema for the dynamicsecretconfigs API
-// +k8s:openapi-gen=true
-type DynamicSecretConfig struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// +optional
+	Tags []string `json:"tags"`
 
-	Spec   DynamicSecretConfigSpec   `json:"spec,omitempty"`
-	Status DynamicSecretConfigStatus `json:"status,omitempty"`
+	// +optional
+	VHosts map[string]RabbitMQVhost `json:"vhosts"`
 }
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// RabbitMQVhost describes a RabbitMQ VHost.
+type RabbitMQVhost struct {
+	Configure string `json:"configure"`
+	Write     string `json:"write"`
+	Read      string `json:"read"`
+}
+
+// PostgreSQLConfig contains the connection infomation, and creation and
+// revocation statements used to provision and revoke a PostgreSQL secret.
+type PostgreSQLConfig struct {
+	URI        string   `json:"uri"`
+	Creation   []string `json:"creation"`
+	Revocation []string `json:"revocation,omitempty"`
+}
+
+// PasswordConfig describes how to provision a random password.
+type PasswordConfig struct {
+	Length int `json:"length"`
+
+	// +optional
+	NumDigits int `json:"numDigits,omitempty"`
+
+	// +optional
+	NumSymbols int `json:"numSymbols,omitempty"`
+
+	// +optional
+	DisableUppercase bool `json:"disableUppercase,omitempty"`
+
+	// +optional
+	AllowRepeatCharacters bool `json:"allowRepeatCharacters,omitempty"`
+}
 
 // DynamicSecretConfigList contains a list of DynamicSecretConfig
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type DynamicSecretConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

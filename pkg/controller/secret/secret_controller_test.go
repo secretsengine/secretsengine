@@ -17,34 +17,36 @@ limitations under the License.
 package secret
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/onsi/gomega"
 	"golang.org/x/net/context"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/secretsengine/secretsengine/pkg/apis/config/v1alpha1"
 )
 
-var c client.Client
+var (
+	c client.Client
 
-var expectedRequest = reconcile.Request{NamespacedName: types.NamespacedName{Name: "foo", Namespace: "default"}}
-var depKey = types.NamespacedName{Name: "foo-deployment", Namespace: "default"}
+	expectedRequest = reconcile.Request{NamespacedName: types.NamespacedName{Name: "foo", Namespace: "default"}}
+	secretName      = types.NamespacedName{Name: "foo", Namespace: "default"}
+)
 
 const timeout = time.Second * 5
 
 func TestReconcile(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	instance := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"}}
 
-	// Setup the Manager and Controller.  Wrap the Controller Reconcile function so it writes each request to a
-	// channel when it is finished.
+	// Setup manager and controller.
 	mgr, err := manager.New(cfg, manager.Options{})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	c = mgr.GetClient()
@@ -53,29 +55,72 @@ func TestReconcile(t *testing.T) {
 	g.Expect(add(mgr, recFn)).NotTo(gomega.HaveOccurred())
 	defer close(StartTestManager(mgr, g))
 
-	// Create the Secret object and expect the Reconcile and Deployment to be created
+	// Define secret
+	instance := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name:      "foo",
+		Namespace: "default",
+		Annotations: map[string]string{
+			DynamicSecretConfigNameAnnotation: "password-secrets-engine",
+		},
+	}}
+
+	// Create the secret
 	err = c.Create(context.TODO(), instance)
-	// The instance object may not be a valid object because it might be missing some required fields.
-	// Please modify the instance object by adding required fields and then remove the following if statement.
-	if apierrors.IsInvalid(err) {
-		t.Logf("failed to create object, got an invalid object error: %v", err)
-		return
-	}
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	defer c.Delete(context.TODO(), instance)
+
+	// Define dynamic secret config
+	config := &v1alpha1.DynamicSecretConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "password-secrets-engine",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.DynamicSecretConfigSpec{
+			Password: &v1alpha1.PasswordConfig{
+				Length:     10,
+				NumSymbols: 5,
+			},
+		},
+	}
+
+	// Create the config
+	err = c.Create(context.TODO(), config)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	// Process secret
 	g.Eventually(requests, timeout).Should(gomega.Receive(gomega.Equal(expectedRequest)))
 
-	deploy := &appsv1.Deployment{}
-	g.Eventually(func() error { return c.Get(context.TODO(), depKey, deploy) }, timeout).
-		Should(gomega.Succeed())
+	// Check secret was updated
+	checkUpdated := func() error {
+		secret := &corev1.Secret{}
+		err := c.Get(context.TODO(), secretName, secret)
+		if err != nil {
+			return err
+		}
 
-	// Delete the Deployment and expect Reconcile to be called for Deployment deletion
-	g.Expect(c.Delete(context.TODO(), deploy)).NotTo(gomega.HaveOccurred())
+		if secret.Data == nil || len(secret.Data["password"]) != 10 || !(&DynamicSecret{secret}).Valid() {
+			return fmt.Errorf("credentials were not provisioned")
+		}
+		return nil
+	}
+	g.Eventually(checkUpdated, timeout).Should(gomega.Succeed())
+
+	// Delete secret
+	g.Expect(c.Delete(context.TODO(), instance)).To(gomega.Succeed())
+
+	// Process secret
 	g.Eventually(requests, timeout).Should(gomega.Receive(gomega.Equal(expectedRequest)))
-	g.Eventually(func() error { return c.Get(context.TODO(), depKey, deploy) }, timeout).
-		Should(gomega.Succeed())
 
-	// Manually delete Deployment since GC isn't enabled in the test control plane
-	g.Expect(c.Delete(context.TODO(), deploy)).To(gomega.Succeed())
-
+	// Check secret was deleted
+	checkDeleted := func() error {
+		secret := &corev1.Secret{}
+		err := c.Get(context.TODO(), secretName, secret)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		return fmt.Errorf("secret not deleted")
+	}
+	g.Eventually(checkDeleted, timeout).Should(gomega.Succeed())
 }
